@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rastgele Satranç Dizilimi</title>
+<style>
+  :root { --light:#ecdcb8; --dark:#a9794f; --glow:#ffd54a; --bg:#2b2622; --panel:#352e28; --line:#5a4b3c; --ink:#f3ece0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background:var(--bg); color:var(--ink); font-family:Georgia,"Times New Roman",serif;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:20px 12px 40px; gap:14px; }
+  h1 { font-size:1.4rem; font-weight:normal; margin:0; }
+  .wrap { width:min(92vw,560px); }
+  .board { display:grid; grid-template-columns:repeat(8,1fr); aspect-ratio:1; border:6px solid #1a1612; border-radius:4px; }
+  .sq { position:relative; display:flex; align-items:center; justify-content:center; font-size:min(9vw,52px); line-height:1;
+    transition:box-shadow .25s, background-color .25s; }
+  .sq.l { background:var(--light); } .sq.d { background:var(--dark); }
+  .coord { position:absolute; font-size:10px; opacity:.6; color:#3a2c1e; font-family:system-ui,sans-serif; }
+  .rank { top:2px; left:3px; } .file { bottom:1px; right:3px; }
+  .sq.hl { background:var(--glow); box-shadow:inset 0 0 0 3px #fff6, 0 0 18px 4px var(--glow); z-index:2; }
+  .piece { display:block; }
+  .piece.w { color:#fff; text-shadow:0 0 2px #000,0 0 2px #000,0 1px 3px #000; }
+  .piece.b { color:#151210; text-shadow:0 0 1px #fff4; }
+  .piece.pop { animation:pop .35s ease-out; }
+  @keyframes pop { from{transform:scale(.3);opacity:0} to{transform:scale(1);opacity:1} }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; align-items:center; }
+  button { font:inherit; font-size:1rem; padding:10px 18px; border-radius:6px; border:1px solid #6b5a48; background:#3a322b; color:var(--ink); cursor:pointer; }
+  button.primary { background:#c9953c; color:#1d1710; border-color:#c9953c; }
+  button:disabled { opacity:.5; cursor:default; }
+  :focus-visible { outline:2px solid var(--glow); outline-offset:2px; }
+  .status { min-height:1.4em; font-size:.95rem; opacity:.85; text-align:center; }
+  .log { font-size:.85rem; opacity:.75; text-align:center; max-width:560px; line-height:1.6; }
+  .toggle { display:flex; align-items:center; gap:6px; font-size:.95rem; }
+
+  .fen { width:min(92vw,560px); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; display:none; flex-direction:column; gap:8px; }
+  .fen.show { display:flex; }
+  .fen-row { display:flex; gap:8px; }
+  .fen input { flex:1; min-width:0; font:13px ui-monospace,Menlo,Consolas,monospace; padding:9px; border-radius:6px; border:1px solid var(--line); background:#221d19; color:var(--ink); }
+  .fen a { color:#e2b866; font-size:.9rem; }
+
+  details.settings { width:min(92vw,560px); background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+  details.settings summary { cursor:pointer; padding:12px 14px; list-style:none; }
+  details.settings summary::-webkit-details-marker { display:none; }
+  details.settings summary::after { content:"+"; float:right; }
+  details.settings[open] summary::after { content:"−"; }
+  .set-body { padding:2px 14px 14px; display:flex; flex-direction:column; gap:14px; }
+  fieldset { border:1px solid var(--line); border-radius:6px; margin:0; padding:10px 12px 12px; }
+  legend { padding:0 6px; font-size:.95rem; }
+  .hint { font-size:.8rem; opacity:.7; margin:0 0 8px; }
+  .wrow { display:grid; grid-template-columns:1fr 84px 52px; gap:8px; align-items:center; padding:3px 0; }
+  .wrow input { width:100%; font:inherit; padding:7px; border-radius:6px; border:1px solid var(--line); background:#221d19; color:var(--ink); text-align:right; }
+  .wrow .eff { text-align:right; font-size:.85rem; opacity:.75; font-variant-numeric:tabular-nums; }
+  @media (prefers-reduced-motion:reduce) { .piece.pop{animation:none} }
+</style>
+</head>
+<body>
+  <h1>Rastgele Satranç Dizilimi</h1>
+  <div class="wrap"><div class="board" id="board" aria-label="Satranç tahtası"></div></div>
+  <div class="status" id="status" aria-live="polite"></div>
+  <div class="controls">
+    <button class="primary" id="go">Tahtayı Oluştur</button>
+    <button id="reset">Sıfırla</button>
+    <label class="toggle"><input type="checkbox" id="sound" checked> Ses</label>
+  </div>
+  <div class="log" id="log"></div>
+
+  <div class="fen" id="fenBox">
+    <strong>FEN</strong>
+    <div class="fen-row">
+      <input id="fenText" readonly aria-label="FEN kodu">
+      <button id="copy">FEN'i Kopyala</button>
+    </div>
+    <a id="lichess" href="#" target="_blank" rel="noopener">Lichess analiz tahtasında aç</a>
+  </div>
+
+  <details class="settings">
+    <summary>Ağırlık ayarları</summary>
+    <div class="set-body">
+      <fieldset>
+        <legend>Arka taşlar (1. ve 8. sıra: c1, f1, c8, f8)</legend>
+        <p class="hint">Değerler oransaldır; toplamın 100 olması gerekmez. Sağdaki sütun gerçek yüzdeyi gösterir.</p>
+        <div id="backRows"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Ön taşlar (2. ve 7. sıra: c, d, e, f)</legend>
+        <div id="frontRows"></div>
+      </fieldset>
+      <button id="defaults">Varsayılanlara dön</button>
+    </div>
+  </details>
+
+<script>
+const DEFAULTS = {
+  back:  { N: 40, B: 40, R: 19, Q: 1 },
+  front: { P: 70, N: 15, B: 15 }
+};
+const ORDER = ['f1','c8','f2','c7','e2','d7','d2','e7','c2','f7','c1','f8'];
+const STEP_MS = 700, GLOW_MS = 350;
+
+const GLYPH = { K:'♚', Q:'♛', R:'♜', B:'♝', N:'♞', P:'♟' };
+const NAMES = { K:'Şah', Q:'Vezir', R:'Kale', B:'Fil', N:'At', P:'Piyon' };
+const FIXED = { e1:['K','w'], d1:['Q','w'], e8:['K','b'], d8:['Q','b'] };
+
+let WEIGHTS = JSON.parse(JSON.stringify(DEFAULTS));
+try {
+  const saved = JSON.parse(localStorage.getItem('chessWeights'));
+  if (saved && saved.back && saved.front) WEIGHTS = saved;
+} catch (e) {}
+const saveWeights = () => { try { localStorage.setItem('chessWeights', JSON.stringify(WEIGHTS)); } catch (e) {} };
+
+const $ = id => document.getElementById(id);
+const boardEl = $('board'), statusEl = $('status'), logEl = $('log');
+const goBtn = $('go'), resetBtn = $('reset');
+let running = false;
+const state = {}; // kare -> [taş, renk]
+
+/* ---------- Ses ---------- */
+let ac = null;
+function clack() {
+  if (!$('sound').checked) return;
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === 'suspended') ac.resume();
+    const t = ac.currentTime;
+    // kısa gürültü patlaması (tahta teması)
+    const len = Math.floor(ac.sampleRate * 0.05);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    const n = ac.createBufferSource(); n.buffer = buf;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.8;
+    const ng = ac.createGain(); ng.gain.setValueAtTime(0.7, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    n.connect(bp).connect(ng).connect(ac.destination); n.start(t);
+    // alçak "tok" gövdesi
+    const o = ac.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(260, t); o.frequency.exponentialRampToValueAtTime(90, t + 0.09);
+    const og = ac.createGain(); og.gain.setValueAtTime(0.5, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
+    o.connect(og).connect(ac.destination); o.start(t); o.stop(t + 0.12);
+  } catch (e) {}
+}
+
+/* ---------- Tahta ---------- */
+function buildBoard() {
+  boardEl.innerHTML = '';
+  for (const k in state) delete state[k];
+  for (let r = 8; r >= 1; r--) for (let f = 0; f < 8; f++) {
+    const name = 'abcdefgh'[f] + r;
+    const sq = document.createElement('div');
+    sq.className = 'sq ' + ((f + r) % 2 === 0 ? 'd' : 'l');
+    sq.id = 'sq-' + name;
+    if (f === 0) sq.insertAdjacentHTML('beforeend', `<span class="coord rank">${r}</span>`);
+    if (r === 1) sq.insertAdjacentHTML('beforeend', `<span class="coord file">${'abcdefgh'[f]}</span>`);
+    boardEl.appendChild(sq);
+  }
+  for (const [name, [p, c]] of Object.entries(FIXED)) place(name, p, c, false);
+  $('fenBox').classList.remove('show');
+}
+
+function place(name, piece, color, animate = true) {
+  const sq = $('sq-' + name);
+  const old = sq.querySelector('.piece'); if (old) old.remove();
+  const el = document.createElement('span');
+  el.className = `piece ${color}` + (animate ? ' pop' : '');
+  el.textContent = GLYPH[piece] + '\uFE0E';
+  el.title = NAMES[piece];
+  sq.appendChild(el);
+  state[name] = [piece, color];
+}
+
+function pick(weights) {
+  const e = Object.entries(weights).filter(([, w]) => w > 0);
+  if (!e.length) return Object.keys(weights)[0];
+  let r = Math.random() * e.reduce((s, [, w]) => s + w, 0);
+  for (const [p, w] of e) if ((r -= w) < 0) return p;
+  return e[e.length - 1][0];
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* ---------- FEN ---------- */
+function makeFEN() {
+  const rows = [];
+  for (let r = 8; r >= 1; r--) {
+    let s = '', empty = 0;
+    for (let f = 0; f < 8; f++) {
+      const cell = state['abcdefgh'[f] + r];
+      if (!cell) { empty++; continue; }
+      if (empty) { s += empty; empty = 0; }
+      s += cell[1] === 'w' ? cell[0] : cell[0].toLowerCase();
+    }
+    if (empty) s += empty;
+    rows.push(s);
+  }
+  // a/h kalesi hiç olmadığı için rok hakkı yok
+  return rows.join('/') + ' w - - 0 1';
+}
+function showFEN() {
+  const fen = makeFEN();
+  $('fenText').value = fen;
+  $('lichess').href = 'https://lichess.org/analysis/' + fen.replace(/ /g, '_');
+  $('fenBox').classList.add('show');
+}
+$('copy').addEventListener('click', async () => {
+  const input = $('fenText'), btn = $('copy');
+  try { await navigator.clipboard.writeText(input.value); }
+  catch (e) { input.select(); document.execCommand('copy'); }
+  btn.textContent = 'Kopyalandı';
+  setTimeout(() => btn.textContent = "FEN'i Kopyala", 1400);
+});
+
+/* ---------- Üretim ---------- */
+async function generate() {
+  if (running) return;
+  running = true; goBtn.disabled = true; setInputs(true);
+  buildBoard(); logEl.textContent = '';
+  const results = [];
+  for (let i = 0; i < ORDER.length; i++) {
+    const name = ORDER[i], color = i % 2 === 0 ? 'w' : 'b';
+    const isBack = name[1] === '1' || name[1] === '8';
+    const piece = pick(isBack ? WEIGHTS.back : WEIGHTS.front);
+    const sq = $('sq-' + name);
+    statusEl.textContent = `${name} karesi için taş seçiliyor…`;
+    sq.classList.add('hl');
+    await sleep(GLOW_MS);
+    place(name, piece, color); clack();
+    results.push(`${name}: ${NAMES[piece]}`);
+    logEl.textContent = results.join('  ·  ');
+    await sleep(Math.max(0, STEP_MS - GLOW_MS));
+    sq.classList.remove('hl');
+  }
+  statusEl.textContent = 'Dizilim hazır.';
+  showFEN();
+  running = false; goBtn.disabled = false; setInputs(false);
+}
+function reset() {
+  if (running) return;
+  buildBoard(); statusEl.textContent = ''; logEl.textContent = '';
+}
+
+/* ---------- Ayar paneli ---------- */
+function setInputs(disabled) {
+  document.querySelectorAll('.wrow input, #defaults').forEach(el => el.disabled = disabled);
+}
+function buildSettings() {
+  for (const [group, boxId] of [['back', 'backRows'], ['front', 'frontRows']]) {
+    const box = $(boxId); box.innerHTML = '';
+    for (const p of Object.keys(DEFAULTS[group])) {
+      const row = document.createElement('div'); row.className = 'wrow';
+      row.innerHTML = `<label for="w-${group}-${p}">${NAMES[p]} ${GLYPH[p]}\uFE0E</label>
+        <input type="number" id="w-${group}-${p}" min="0" step="any" value="${WEIGHTS[group][p]}">
+        <span class="eff" id="e-${group}-${p}"></span>`;
+      box.appendChild(row);
+      row.querySelector('input').addEventListener('input', ev => {
+        const v = parseFloat(ev.target.value);
+        WEIGHTS[group][p] = isFinite(v) && v >= 0 ? v : 0;
+        saveWeights(); refreshEff();
+      });
+    }
+  }
+  refreshEff();
+}
+function refreshEff() {
+  for (const group of ['back', 'front']) {
+    const total = Object.values(WEIGHTS[group]).reduce((s, w) => s + w, 0);
+    for (const p of Object.keys(WEIGHTS[group])) {
+      $(`e-${group}-${p}`).textContent = total > 0 ? (WEIGHTS[group][p] / total * 100).toFixed(1).replace(/\.0$/, '') + '%' : '–';
+    }
+  }
+}
+$('defaults').addEventListener('click', () => {
+  WEIGHTS = JSON.parse(JSON.stringify(DEFAULTS)); saveWeights(); buildSettings();
+});
+
+goBtn.addEventListener('click', generate);
+resetBtn.addEventListener('click', reset);
+buildBoard();
+buildSettings();
+</script>
+</body>
+</html>
